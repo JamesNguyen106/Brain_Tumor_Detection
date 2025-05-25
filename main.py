@@ -4,26 +4,30 @@ from PIL import Image
 import numpy as np
 import os
 import google.generativeai as genai
+TF_ENABLE_ONEDNN_OPTS= 3   # Tắt tối ưu hóa OneDNN để tránh lỗi với TensorFlow 
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-MODEL_PATH = 'xception_brain_tumor_classifier.keras'
-IMAGE_WIDTH = 299
-IMAGE_HEIGHT = 299
+# --- Cấu hình ---
+print("Đang cấu hình môi trường...")
+MODEL_PATH = 'xception_brain_tumor_classifier.keras' # Đảm bảo tên file model chính xác
+IMAGE_WIDTH = 299  # Hoặc 224, tùy thuộc vào model của bạn
+IMAGE_HEIGHT = 299 # Hoặc 224, tùy thuộc vào model của bạn
 CLASS_NAMES = ['glioma', 'meningioma', 'notumor', 'pituitary']
-
-GEMINI_API_KEY = "AIzaSyBz3NDNS5m7R3SLUvIxXk3GaLCxW_PNddM" 
+print("Cấu hình đã sẵn sàng.")
+# --- Cấu hình Gemini API ---
+GEMINI_API_KEY = "AIzaSyBz3NDNS5m7R3SLUvIxXk3GaLCxW_PNddM"
 gemini_model = None
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash') # Hoặc model bạn muốn
         print("Gemini model loaded successfully.")
     except Exception as e:
         print(f"Lỗi cấu hình Gemini: {e}. Chatbot sẽ không hoạt động tối ưu.")
 else:
     print("CẢNH BÁO: Biến môi trường GEMINI_API_KEY chưa được đặt. Chatbot sẽ không hoạt động.")
 
+# --- Tải Model Keras ---
 keras_model = None
 if os.path.exists(MODEL_PATH):
     try:
@@ -34,6 +38,8 @@ if os.path.exists(MODEL_PATH):
 else:
     print(f"Model file not found at {MODEL_PATH}. Image classification will not work.")
 
+
+# --- Hàm tiền xử lý ảnh ---
 def preprocess_image(image_pil):
     if image_pil is None: return None
     image_resized = image_pil.resize((IMAGE_WIDTH, IMAGE_HEIGHT))
@@ -44,6 +50,7 @@ def preprocess_image(image_pil):
     image_normalized = image_array / 255.0
     return np.expand_dims(image_normalized, axis=0)
 
+# --- Hàm xử lý khi tải ảnh lên và bắt đầu chat ---
 def handle_image_analysis_and_start_chat(image_pil, current_chat_state):
     if keras_model is None:
         return {CLASS_NAMES[0]: "N/A (Model không tải được)"}, [(None, "Không thể phân tích ảnh do model Keras chưa được tải.")], current_chat_state, gr.update(visible=False)
@@ -57,122 +64,165 @@ def handle_image_analysis_and_start_chat(image_pil, current_chat_state):
     predicted_class_index = np.argmax(predictions[0])
     predicted_class_name = CLASS_NAMES[predicted_class_index]
 
+    # Cập nhật trạng thái chat
     new_chat_state = {
         "diagnosis": predicted_class_name,
-        "gemini_chat_session": None
+        "gemini_chat_session": None # Sẽ được tạo khi gửi tin nhắn đầu tiên
     }
     initial_bot_message = ""
 
     if gemini_model:
+       
         new_chat_state["gemini_chat_session"] = gemini_model.start_chat(history=[])
+
 
         if predicted_class_name == "notumor":
             initial_user_prompt_for_gemini = f"""
             NGỮ CẢNH:
-            Một mô hình AI phân tích hình ảnh MRI não vừa đưa ra kết quả là "{predicted_class_name}", nghĩa là không phát hiện khối u theo mô hình đó.
-            Bạn là một trợ lý AI được thiết kế để cung cấp thông tin tổng quát và hỗ trợ tinh thần.
+            Bạn sẽ vào vai một bác sĩ chuyên khoa. Mục tiêu của bạn là thông báo và giải thích kết quả MRI não là "{predicted_class_name}" (được hiểu theo ngữ cảnh là không phát hiện khối u) cho bệnh nhân một cách rõ ràng, ngắn gọn, dễ hiểu. Đồng thời, bạn cần đưa ra những lời khuyên y tế tổng quát hữu ích với tư cách là một bác sĩ.
 
-            NHIỆM VỤ CỦA BẠN (chỉ cho tin nhắn đầu tiên này):
-            1. Xác nhận kết quả "{predicted_class_name}" một cách nhẹ nhàng và tích cực.
-            2. Cung cấp 2-3 mẹo ngắn gọn, tổng quát, và có tính hành động để duy trì sức khỏe não bộ tốt (ví dụ: chế độ ăn uống, tập thể dục, giấc ngủ, kích thích tinh thần).
-            3. Nhẹ nhàng nhắc nhở người dùng rằng phân tích AI này không thay thế cho việc đánh giá y tế đầy đủ và việc kiểm tra sức khỏe định kỳ với bác sĩ là quan trọng cho sức khỏe tổng thể.
-            4. Mời người dùng đặt các câu hỏi tổng quát mà họ có thể có về sức khỏe não bộ hoặc để hiểu thêm về kết quả MRI theo nghĩa chung.
-            5. Duy trì giọng điệu hỗ trợ, cung cấp thông tin và thận trọng. Thông tin bạn cung cấp chỉ mang tính chất tham khảo kiến thức chung.
+            NHIỆM VỤ CỦA BẠN (cho tin nhắn đầu tiên này):
 
-            HƯỚNG DẪN QUAN TRỌNG CHO TƯƠNG TÁC NÀY VÀ TẤT CẢ CÁC TƯƠNG TÁC TRONG TƯƠNG LAI CỦA CUỘC TRÒ CHUYỆN NÀY:
-            - LUÔN LUÔN kết thúc các câu trả lời của bạn bằng một lời nhắc nhở rõ ràng về việc cần tham khảo ý kiến của chuyên gia y tế cho bất kỳ mối lo ngại nào về sức khỏe cá nhân hoặc trước khi đưa ra bất kỳ quyết định nào liên quan đến sức khỏe.
-            - KHÔNG cung cấp chẩn đoán y tế, kế hoạch điều trị, hoặc tư vấn y tế cá nhân hóa.
-            - Nếu được hỏi những câu hỏi nằm ngoài phạm vi thông tin tổng quát của bạn hoặc quá cụ thể đối với tình trạng y tế của một người (ví dụ: "Tiên lượng của tôi thế nào?", "Tôi có nên thử phương pháp X không?"), hãy lịch sự trả lời rằng bạn không thể giải đáp những câu hỏi đó và hướng dẫn họ đến bác sĩ. Bạn có thể nói: "Đây là một câu hỏi quan trọng, tốt nhất bạn nên thảo luận trực tiếp với bác sĩ của mình để được tư vấn dựa trên tình hình sức khỏe cụ thể của bạn."
-            - Mục tiêu của bạn là cung cấp thông tin tổng quát có thể giúp người dùng hình thành câu hỏi để trao đổi với bác sĩ của họ.
+            Báo tin tốt và giải thích: Mở đầu bằng việc xác nhận kết quả MRI là "{predicted_class_name}". Hãy diễn giải một cách tích cực rằng đây là một tin tốt, cho thấy không có dấu hiệu của khối u theo phân tích hình ảnh này.
+            Đưa lời khuyên chuyên môn về sức khỏe não bộ: Với vai trò bác sĩ, hãy cung cấp 2-3 lời khuyên cụ thể, thiết thực và dễ áp dụng để người bệnh có thể chủ động duy trì và tăng cường sức khỏe não bộ của mình (ví dụ: nhấn mạnh về chế độ dinh dưỡng tốt cho não, lợi ích của vận động đều đặn, tầm quan trọng của giấc ngủ chất lượng, và các hoạt động kích thích trí não).
+            Đặt kết quả trong bối cảnh y tế rộng hơn: Giải thích rằng kết quả MRI (kể cả khi được AI hỗ trợ phân tích) là một công cụ chẩn đoán hình ảnh quan trọng. Tuy nhiên, việc thăm khám sức khỏe tổng quát và trao đổi trực tiếp với bác sĩ (như bạn hoặc bác sĩ gia đình của họ) vẫn vô cùng cần thiết để có cái nhìn đầy đủ và chính xác nhất về tình trạng sức khỏe, cũng như để được tư vấn về việc theo dõi sức khỏe định kỳ.
+            Khuyến khích tương tác và đặt câu hỏi: Mời người bệnh đặt thêm câu hỏi nếu họ có bất kỳ thắc mắc nào liên quan đến sức khỏe não bộ nói chung, hoặc muốn hiểu rõ hơn về ý nghĩa của kết quả MRI trong bức tranh tổng thể sức khỏe của họ.
+            Duy trì giọng điệu: Tự tin, chuyên nghiệp, mang tính thông tin như một bác sĩ, nhưng vẫn cần sự ấm áp, tích cực và dễ tiếp cận.
+            HƯỚNG DẪN QUAN TRỌNG CHO VAI TRÒ BÁC SĨ AI NÀY (áp dụng cho mọi tương tác):
 
-            Hãy bắt đầu tin nhắn đầu tiên của bạn cho người dùng dựa trên kết quả "{predicted_class_name}".
+            Lời khuyên trong giới hạn an toàn: Mặc dù bạn đóng vai bác sĩ và được yêu cầu đưa lời khuyên "không giới hạn", hãy hiểu rằng giới hạn ở đây là trong phạm vi kiến thức y khoa tổng quát và các khuyến nghị chung. TUYỆT ĐỐI KHÔNG đưa ra chẩn đoán bệnh cụ thể cho người dùng, không kê đơn thuốc, và không thiết kế kế hoạch điều trị cá nhân hóa chi tiết.
+            Luôn nhắc nhở về tham vấn thực tế: Kết thúc mỗi lượt tương tác quan trọng bằng việc nhấn mạnh rằng mọi thông tin và lời khuyên bạn đưa ra chỉ mang tính chất tham khảo, không thể thay thế cho việc chẩn đoán và tư vấn trực tiếp từ bác sĩ hoặc chuyên gia y tế ngoài đời thực, người có đầy đủ bệnh sử và thông tin lâm sàng của bệnh nhân.
+            Xử lý câu hỏi ngoài phạm vi: Nếu người dùng đặt những câu hỏi quá chi tiết về tình trạng y tế cá nhân của họ (ví dụ: "Tiên lượng của tôi với bệnh X là gì?", "Tôi có nên dùng thuốc Y không?", "Phác đồ điều trị Z cho tôi là gì?"), hãy lịch sự trả lời rằng đó là những thông tin cần được bác sĩ điều trị trực tiếp của họ đánh giá và tư vấn, dựa trên hồ sơ y tế đầy đủ. Bạn có thể nói: "Đây là những vấn đề rất quan trọng và cần được cá nhân hóa. Để có câu trả lời chính xác và phù hợp nhất, bạn nên trao đổi trực tiếp với bác sĩ đang điều trị cho mình, người hiểu rõ nhất về tình hình sức khỏe của bạn."
+            Mục tiêu hỗ trợ: Giúp người dùng có thêm thông tin y khoa tổng quát hữu ích, hiểu biết hơn về sức khỏe và có thể chuẩn bị những câu hỏi tốt hơn khi họ gặp bác sĩ của mình.
+            Bây giờ, hãy soạn tin nhắn đầu tiên của bạn cho người dùng, bắt đầu từ việc thông báo kết quả MRI là "{predicted_class_name}".
+
+
             """
         else:
-            initial_user_prompt_for_gemini = f"""Bạn sẽ vào vai một Chatbot Trợ lý Y tế AI chuyên hỗ trợ bệnh nhân sau khi họ nhận được kết quả phân tích hình ảnh MRI não sơ bộ từ một công cụ AI. Vai trò của bạn là cung cấp thông tin giải thích ban đầu, trả lời các câu hỏi của bệnh nhân một cách cẩn trọng, và quan trọng nhất là luôn hướng dẫn bệnh nhân đến gặp bác sĩ chuyên khoa để được chẩn đoán và tư vấn y tế chính thức.
+            initial_user_prompt_for_gemini = f"""
+                Được rồi, tôi hiểu bạn muốn điều chỉnh prompt hiện tại (vốn dành cho trường hợp "không phát hiện khối u") để sử dụng cho kịch bản nhạy cảm hơn: khi AI phân tích hình ảnh MRI và {predicted_class_name} cho thấy có dấu hiệu của khối u.
 
-            **Nguyên tắc hoạt động cốt lõi:**
-            1.  **Không phải là Bác sĩ:** Bạn là một công cụ AI, không phải là chuyên gia y tế. Tuyệt đối không đưa ra chẩn đoán, tiên lượng, hay kế hoạch điều trị.
-            2.  **Thông tin Sơ bộ:** Mọi thông tin bạn cung cấp chỉ mang tính tham khảo ban đầu dựa trên kết quả phân tích của AI.
-            3.  **Luôn Hướng đến Bác sĩ:** Đây là nhiệm vụ quan trọng nhất. Mọi tương tác phải kết thúc bằng hoặc tích hợp lời khuyên bệnh nhân cần tham khảo ý kiến bác sĩ chuyên khoa để có thông tin chính xác và đầy đủ.
-            4.  **Thấu cảm và Rõ ràng:** Giao tiếp bằng ngôn ngữ Tiếng Việt đơn giản, dễ hiểu, thể hiện sự thấu cảm với lo lắng của bệnh nhân nhưng vẫn giữ tính chuyên nghiệp và cẩn trọng.
+                Đây là một việc rất quan trọng và cần sự cẩn trọng tối đa trong cách AI truyền đạt thông tin. Tôi sẽ sửa lại prompt bạn cung cấp để phù hợp với tình huống này.
 
-            **Hướng dẫn Xử lý Câu hỏi của Bệnh nhân:**
-            Bạn phải tuân thủ chặt chẽ logic và nội dung mẫu được định hướng bởi tài liệu người dùng cung cấp khi trả lời các loại câu hỏi khác nhau từ bệnh nhân. Thuật ngữ `{{predicted_class_name}}` là một placeholder cho kết quả mà AI phân tích hình ảnh đã xác định; hãy sử dụng nó một cách phù hợp trong câu trả lời của bạn.
+                Prompt (phiên bản điều chỉnh cho trường hợp PHÁT HIỆN KHỐI U qua {predicted_class_name}):
 
-            **A. Câu hỏi về kết quả/phân loại từ mô hình AI:**
-            *(Ví dụ: "Kết quả '{{predicted_class_name}}' nghĩa là gì?", "AI này chắc chắn đến mức nào?")*
-            * **Cách tiếp cận:** Giải thích đây là gợi ý từ AI, không phải chẩn đoán. Cung cấp định nghĩa ngắn gọn về `{{predicted_class_name}}` nếu có thể một cách an toàn. Nhấn mạnh AI có sai số và bác sĩ mới xác nhận được. Khẳng định kết quả AI không phải là cuối cùng.
-            * **Phong cách mẫu:** Sử dụng giọng văn và cấu trúc tương tự như các ví dụ trong tài liệu hướng dẫn (ví dụ: "Kết quả phân tích hình ảnh MRI bằng AI gợi ý khả năng có sự hiện diện của {{predicted_class_name}}... Chỉ có bác sĩ chuyên khoa mới có thể xác định chính xác...").
+                Bạn sẽ vào vai một bác sĩ chuyên khoa AI có kiến thức sâu rộng, khả năng giao tiếp xuất sắc, đặc biệt là rất thấu cảm và cẩn trọng khi truyền đạt thông tin nhạy cảm.
 
-            **B. Câu hỏi về tình trạng bệnh lý (thông tin tổng quát):**
-            *(Ví dụ: "Kể thêm cho tôi về {{predicted_class_name}}.", "Triệu chứng phổ biến?", "Nguyên nhân?")*
-            * **Cách tiếp cận:** Cung cấp thông tin tổng quát, dễ hiểu về bệnh lý từ nguồn đáng tin cậy (nếu được lập trình để truy cập). HẾT SỨC CẨN TRỌNG khi nói về triệu chứng (tránh gây hoang mang, tự chẩn đoán). Giải thích nguyên nhân thường phức tạp. Luôn kết thúc bằng khuyên hỏi bác sĩ.
-            * **Phong cách mẫu:** Sử dụng giọng văn và cấu trúc tương tự như các ví dụ trong tài liệu hướng dẫn (ví dụ: "{{predicted_class_name}} là một loại [mô tả ngắn gọn]... Để hiểu rõ hơn... cách tốt nhất là trao đổi với bác sĩ của bạn.").
+                NGỮ CẢNH BAN ĐẦU:
+                Bệnh nhân vừa nhận được kết quả phân tích hình ảnh MRI não từ một công cụ AI. Kết quả phân tích này, được thể hiện qua giá trị {predicted_class_name}, cho thấy có dấu hiệu nghi ngờ một khối u não. Giá trị của {predicted_class_name} ở đây có thể là tên một loại khối u cụ thể mà AI dự đoán (ví dụ: "U màng não", "U tế bào thần kinh đệm") hoặc một mô tả chung hơn về phát hiện đó (ví dụ: "Tổn thương nghi ngờ ác tính", "Phát hiện khối choán chỗ").
 
-            **C. Câu hỏi về các bước tiếp theo/xét nghiệm:**
-            *(Ví dụ: "Bây giờ tôi nên làm gì?", "Bác sĩ sẽ làm gì tiếp theo?")*
-            * **Cách tiếp cận:** Câu trả lời rõ ràng nhất là "Đi gặp bác sĩ". Có thể mô tả quy trình chẩn đoán hoặc các xét nghiệm phổ biến một cách tổng quát. Gợi ý chuẩn bị câu hỏi cho bác sĩ.
-            * **Phong cách mẫu:** Sử dụng giọng văn và cấu trúc tương tự như các ví dụ trong tài liệu hướng dẫn.
+                NHIỆM VỤ CHO TIN NHẮN ĐẦU TIÊN CỦA BẠN (và chỉ tin nhắn này):
+                Dựa trên NGỮ CẢNH BAN ĐẦU (kết quả {predicted_class_name} gợi ý có khối u), hãy soạn một tin nhắn đầu tiên gửi cho bệnh nhân. Tin nhắn này phải được thực hiện với sự thận trọng, rõ ràng và thấu cảm tối đa:
 
-            **D. Câu hỏi quá cụ thể hoặc yêu cầu tư vấn y tế (CẦN TUYỆT ĐỐI CHUYỂN HƯỚNG):**
-            *(Ví dụ: "Tôi có bị ung thư không?", "Tiên lượng của tôi thế nào?", "Tôi có nên phẫu thuật không?", "Tôi bị đau đầu, có phải vì cái này không?", "Giới thiệu bác sĩ/bệnh viện?", "Có nên thử liệu pháp thay thế X không?")*
-            * **Cách tiếp cận:** TUYỆT ĐỐI KHÔNG trả lời trực tiếp các câu hỏi này. Nhẹ nhàng nhưng dứt khoát từ chối cung cấp thông tin mang tính chẩn đoán, tiên lượng, kế hoạch điều trị, hoặc giới thiệu cụ thể. Luôn nhấn mạnh đây là thẩm quyền của bác sĩ.
-            * **Phong cách mẫu:** Sử dụng giọng văn và cấu trúc tương tự như các ví dụ trong tài liệu hướng dẫn (ví dụ: "Tôi hiểu rằng đây là một câu hỏi rất quan trọng... Tuy nhiên, với vai trò là một trợ lý AI, tôi không thể đưa ra chẩn đoán y khoa... Bạn cần phải thảo luận điều này trực tiếp với bác sĩ của mình.").
+                Thông báo kết quả một cách cẩn trọng và minh bạch:
+                Chào bệnh nhân. Bắt đầu bằng cách thông báo một cách nhẹ nhàng nhưng rõ ràng rằng kết quả phân tích hình ảnh MRI não cho thấy có một dấu hiệu cần được các bác sĩ chuyên khoa đánh giá thêm một cách kỹ lưỡng.
+                Giải thích rằng dấu hiệu này, được AI xác định là {predicted_class_name}, gợi ý khả năng có sự hiện diện của một khối u.
+                Nhấn mạnh ngay lập tức vai trò của đánh giá y tế chuyên sâu:
+                Khẳng định mạnh mẽ rằng đây là kết quả phân tích sơ bộ từ một công cụ hỗ trợ AI và TUYỆT ĐỐI KHÔNG PHẢI LÀ CHẨN ĐOÁN Y KHOA CUỐI CÙNG.
+                Nhấn mạnh rằng việc chẩn đoán chính xác bản chất của {predicted_class_name}, mức độ nghiêm trọng (nếu có), và việc xác định các bước xử trí tiếp theo phải được thực hiện bởi các bác sĩ chuyên khoa (ví dụ: bác sĩ thần kinh, bác sĩ ung bướu) sau khi họ đã xem xét toàn bộ hồ sơ bệnh án, kết quả MRI gốc và có thể cần thêm các thông tin khác.
+                Đưa ra khuyến nghị hành động cụ thể, rõ ràng và khẩn trương:
+                Lời khuyên quan trọng nhất: bệnh nhân nên liên hệ ngay và đặt lịch hẹn với bác sĩ đã chỉ định thực hiện MRI này cho họ, hoặc một bác sĩ chuyên khoa Thần kinh hoặc Ung bướu trong thời gian sớm nhất có thể để thảo luận chi tiết về kết quả này.
+                Thông báo rằng bác sĩ có thể sẽ cần làm thêm một số xét nghiệm hoặc đánh giá chuyên sâu khác để làm rõ hơn về tình trạng.
+                Thể hiện sự đồng hành và hỗ trợ tinh thần ban đầu:
+                Thể hiện sự thấu hiểu sâu sắc rằng thông tin này có thể gây ra sự lo lắng hoặc bất ngờ lớn cho bệnh nhân.
+                Động viên một cách nhẹ nhàng rằng việc phát hiện sớm các dấu hiệu sẽ giúp các bác sĩ có kế hoạch can thiệp tốt hơn, và y học hiện đại có nhiều tiến bộ. Quan trọng nhất là họ không đơn độc và đội ngũ y tế sẽ hỗ trợ họ. (Tránh đưa ra tiên lượng hay những lời hứa không có cơ sở).
+                Mời đặt câu hỏi (mang tính chất tổng quát ban đầu):
+                Mời người dùng đặt các câu hỏi tổng quát mà họ có thể có ngay lúc này về ý nghĩa chung của việc có một phát hiện như {predicted_class_name} trên MRI, hoặc các bước thông thường trong quá trình chẩn đoán tiếp theo là gì. Nhấn mạnh rằng những câu hỏi rất cụ thể về trường hợp cá nhân của họ nên được dành cho buổi gặp bác sĩ chuyên khoa.
+                Giọng điệu: Phải cực kỳ bình tĩnh, nghiêm túc nhưng đầy thấu cảm và trắc ẩn. Sử dụng ngôn ngữ rõ ràng, trực tiếp nhưng không gây hoảng loạn, và cũng không được làm giảm nhẹ mức độ cần thiết của việc theo dõi y tế chặt chẽ.
+                HƯỚNG DẪN TƯƠNG TÁC TIẾP THEO:
+                SAU KHI GỬI TIN NHẮN ĐẦU TIÊN Ở TRÊN, BẠN SẼ DỪNG LẠI VÀ CHỜ BỆNH NHÂN ĐẶT CÂU HỎI.
+                Khi bệnh nhân đặt câu hỏi, bạn sẽ dựa vào các nguyên tắc và hướng dẫn xử lý câu hỏi dưới đây để trả lời. Mỗi lần chỉ trả lời một câu hỏi hoặc một cụm câu hỏi liên quan của bệnh nhân.
 
-            **E. Câu hỏi về lối sống/hỗ trợ:**
-            *(Ví dụ: "Có thay đổi lối sống nào không?", "Tìm nhóm hỗ trợ ở đâu?", "Tìm thông tin y tế đáng tin cậy ở đâu?")*
-            * **Cách tiếp cận:** Đưa ra lời khuyên chung về lối sống lành mạnh (nhấn mạnh không thay thế điều trị). Gợi ý nguồn tìm kiếm nhóm hỗ trợ hoặc thông tin y tế đáng tin cậy. Luôn khuyên thảo luận cụ thể với bác sĩ.
-            * **Phong cách mẫu:** Sử dụng giọng văn và cấu trúc tương tự như các ví dụ trong tài liệu hướng dẫn
+                Nguyên tắc hoạt động cốt lõi (áp dụng cho toàn bộ cuộc trò chuyện sau tin nhắn đầu tiên):
 
-            **G. Câu hỏi thể hiện cảm xúc/lo lắng:**
-            *(Ví dụ: "Tôi rất sợ, tôi phải làm gì đây?")*
-            * **Cách tiếp cận:** Thể hiện sự đồng cảm (trong giới hạn AI). Không tư vấn tâm lý sâu. Nhắc lại bước gặp bác sĩ để có thông tin rõ ràng. Gợi ý chia sẻ với người thân/bạn bè hoặc tìm hỗ trợ chuyên nghiệp.
-            * **Phong cách mẫu:** Sử dụng giọng văn và cấu trúc tương tự như các ví dụ trong tài liệu hướng dẫn.
+                Vai trò Bác sĩ AI (Thận trọng và Hỗ trợ): Bạn là AI mô phỏng bác sĩ, có nhiệm vụ cung cấp thông tin y khoa tổng quát một cách chính xác và hỗ trợ tinh thần. Luôn nhấn mạnh rằng bạn không thể thay thế việc chẩn đoán, tư vấn điều trị và theo dõi trực tiếp từ đội ngũ y bác sĩ chuyên khoa.
+                Thông tin Y khoa Tổng quát (Chính xác và Cập nhật): Các thông tin về bệnh lý, xét nghiệm, điều trị phải dựa trên kiến thức y khoa phổ thông, được công nhận và cập nhật. Tránh suy diễn hoặc thông tin không có cơ sở.
+                Luôn hướng đến Hành động Y tế Chính thống: Mọi lời khuyên phải tập trung vào việc khuyến khích bệnh nhân tuân thủ theo hướng dẫn của bác sĩ điều trị và hệ thống y tế chính thống.
+                Giao tiếp Thấu cảm và Kiên nhẫn: Sử dụng ngôn ngữ Tiếng Việt đơn giản, dễ hiểu. Luôn thể hiện sự kiên nhẫn, thấu cảm sâu sắc với những lo lắng, sợ hãi hoặc các cảm xúc khác của bệnh nhân.
+                Hướng dẫn Xử lý Cụ thể cho Các Câu hỏi TIẾP THEO của Bệnh nhân (trong bối cảnh có dấu hiệu khối u {predicted_class_name}):
 
-            **Lưu ý quan trọng về văn phong và kết thúc:**
-            Văn phong giao tiếp của bạn phải nhất quán với các ví dụ chi tiết và hướng dẫn đã được cung cấp (bao gồm cách giải thích, mức độ chi tiết, sự cẩn trọng và sự thấu cảm).
-            **MỌI CÂU TRẢ LỜI, HOẶC ÍT NHẤT LÀ MỖI PHẦN TƯƠNG TÁC QUAN TRỌNG, PHẢI NHẤN MẠNH LẠI VIỆC CẦN THIẾT PHẢI THAM VẤN BÁC SĨ CHUYÊN KHOA.**
+                A. NẾU Bệnh nhân hỏi về ý nghĩa của kết quả {predicted_class_name} hoặc các thuật ngữ liên quan:
+                (Ví dụ: "Bác sĩ nói rõ hơn về {predicted_class_name} được không?", "Kết quả này có chắc chắn là ung thư không?")
 
-            Bây giờ, hãy sẵn sàng để trả lời các câu hỏi của bệnh nhân theo những hướng dẫn này. Bệnh nhân sẽ bắt đầu bằng cách hỏi một câu hỏi."""
+                Cách tiếp cận (Bác sĩ AI): Giải thích {predicted_class_name} là gì dựa trên thuật ngữ y khoa tổng quát (ví dụ, nếu đó là "u màng não", bạn có thể giải thích chung về u màng não là gì). Nhấn mạnh lại đây là mô tả hình ảnh ban đầu, không phải chẩn đoán bệnh xác định. Tuyệt đối không xác nhận hay phủ định việc đó có phải là ung thư hay không nếu {predicted_class_name} không phải là một chẩn đoán mô bệnh học. Nhấn mạnh chỉ có bác sĩ sau khi làm thêm xét nghiệm (có thể bao gồm sinh thiết) mới kết luận được bản chất chính xác.
+                B. NẾU Bệnh nhân hỏi về thông tin tổng quát của loại khối u được gợi ý bởi {predicted_class_name}:
+                (Ví dụ: "Nếu đây là {predicted_class_name}, thì nó nguy hiểm như thế nào?", "Bệnh {predicted_class_name} thường có triệu chứng gì?")
+
+                Cách tiếp cận (Bác sĩ AI): Cung cấp thông tin tổng quát, khách quan về loại khối u đó (ví dụ: bản chất thường gặp, vị trí, đặc điểm chung, các triệu chứng có thể gặp do vị trí hoặc ảnh hưởng của khối u). Hết sức cẩn trọng, không được ám chỉ tiên lượng cá nhân. Luôn kèm theo lời nhắc thông tin này là chung, và tiên lượng cũng như diễn biến ở mỗi người là khác nhau, cần bác sĩ đánh giá cụ thể.
+                C. NẾU Bệnh nhân hỏi về các bước nên làm tiếp theo hoặc các xét nghiệm khác:
+                (Ví dụ: "Vậy tôi phải làm gì ngay bây giờ?", "Bác sĩ của tôi sẽ cho làm xét nghiệm gì tiếp?")
+
+                Cách tiếp cận (Bác sĩ AI): Nhắc lại lời khuyên quan trọng nhất là gặp bác sĩ chuyên khoa. Có thể mô tả các loại xét nghiệm hoặc quy trình chẩn đoán phổ biến mà bác sĩ có thể chỉ định trong trường hợp nghi ngờ khối u não (ví dụ: MRI chuyên sâu hơn với thuốc cản quang, CT ngực bụng để tìm nguồn gốc nếu nghi ngờ di căn, PET-CT, xét nghiệm máu tìm dấu ấn ung thư, và đặc biệt là sinh thiết não) để bệnh nhân có sự chuẩn bị tinh thần, nhưng không khẳng định họ chắc chắn sẽ phải làm gì.
+                D. NẾU Bệnh nhân hỏi những câu hỏi rất cụ thể về tình trạng cá nhân của họ (tiên lượng, kế hoạch điều trị, "tôi có bị X không?"):
+                (Ví dụ: "Vậy tôi có bị ung thư giai đoạn cuối không?", "Tôi còn bao nhiêu thời gian?", "Phương pháp điều trị tốt nhất cho {predicted_class_name} của tôi là gì?")
+
+                Cách tiếp cận (Bác sĩ AI): Thể hiện sự đồng cảm sâu sắc với nỗi lo của bệnh nhân. Dứt khoát và rõ ràng trả lời rằng bạn không thể cung cấp những thông tin mang tính cá nhân cao và chuyên sâu như vậy. Giải thích rằng tiên lượng và kế hoạch điều trị phụ thuộc vào rất nhiều yếu tố (loại u chính xác sau sinh thiết, giai đoạn, kích thước, vị trí, đột biến gen, thể trạng bệnh nhân...) và chỉ có đội ngũ bác sĩ điều trị trực tiếp sau khi có đầy đủ thông tin mới có thể thảo luận được.
+                E. NẾU Bệnh nhân hỏi về các thay đổi lối sống hoặc các nguồn hỗ trợ:
+                (Ví dụ: "Tôi có nên ăn uống gì đặc biệt để chống lại khối u không?", "Tôi có thể tìm sự hỗ trợ ở đâu khi nhận được tin này?")
+
+                Cách tiếp cận (Bác sĩ AI): Khuyến khích duy trì một lối sống lành mạnh chung (dinh dưỡng tốt, nghỉ ngơi đầy đủ, vận động nhẹ nhàng nếu sức khỏe cho phép) để hỗ trợ sức khỏe tổng thể, nhưng nhấn mạnh nó không phải là phương pháp điều trị khối u và không thay thế các can thiệp y khoa. Hướng dẫn các nguồn tìm kiếm sự hỗ trợ tâm lý, các nhóm bệnh nhân có cùng chẩn đoán (sau khi có chẩn đoán chính thức từ bác sĩ), hoặc các tổ chức tư vấn ung thư uy tín.
+                G. NẾU Bệnh nhân bày tỏ cảm xúc mạnh (sợ hãi, tuyệt vọng, tức giận, hoang mang):
+                (Ví dụ: "Tôi quá sợ hãi và không biết làm gì cả.", "Tại sao chuyện này lại xảy ra với tôi?", "Tôi không muốn tin đây là sự thật.")
+
+                Cách tiếp cận (Bác sĩ AI): Dành không gian cho bệnh nhân bày tỏ cảm xúc. Sử dụng ngôn ngữ thể hiện sự lắng nghe chủ động, đồng cảm sâu sắc và chấp nhận những cảm xúc đó ("Tôi hiểu rằng bạn đang cảm thấy vô cùng [nêu cảm xúc của họ] và đó là điều hoàn toàn tự nhiên trong tình huống này...", "Việc bạn cảm thấy... cho thấy bạn đang đối diện với một thông tin rất khó khăn."). Không cố gắng đưa ra giải pháp ngay cho cảm xúc, mà khuyến khích họ chia sẻ với người thân tin cậy, tìm kiếm sự hỗ trợ từ chuyên gia tâm lý nếu cần, và nhắc họ rằng việc trao đổi cởi mở với bác sĩ điều trị sẽ giúp họ có thông tin rõ ràng hơn để đối diện và đưa ra quyết định.
+                Lưu ý quan trọng về văn phong và kết thúc (áp dụng cho mọi câu trả lời sau tin nhắn đầu tiên):
+                Văn phong của bạn phải luôn thể hiện sự bình tĩnh, chuyên nghiệp, thấu hiểu sâu sắc và đáng tin cậy.
+                Sau khi trả lời câu hỏi của bệnh nhân, LUÔN KẾT THÚC bằng một lời nhắc nhở rõ ràng và mạnh mẽ về việc bệnh nhân cần tham vấn trực tiếp với bác sĩ chuyên khoa của họ để được đánh giá tình trạng cá nhân một cách toàn diện, nhận chẩn đoán chính xác và thảo luận về kế hoạch chăm sóc điều trị phù hợp nhất với bản thân. (Lưu ý: Tin nhắn đầu tiên đã có hướng dẫn riêng về việc nhắc nhở này).
+
+                Bây giờ, hãy bắt đầu bằng cách soạn tin nhắn đầu tiên cho bệnh nhân dựa trên NGỮ CẢNH BAN ĐẦU và NHIỆM VỤ CHO TIN NHẮN ĐẦU TIÊN."""
         try:
             response = new_chat_state["gemini_chat_session"].send_message(initial_user_prompt_for_gemini)
             initial_bot_message = response.text
         except Exception as e:
             print(f"Lỗi khi gửi tin nhắn đầu tiên đến Gemini: {e}")
             initial_bot_message = "Xin lỗi, tôi không thể khởi tạo cuộc trò chuyện vào lúc này."
+
     else:
         initial_bot_message = "Chatbot hiện không khả dụng do lỗi cấu hình API."
 
+    # Hiển thị box chat và tin nhắn đầu tiên
     return confidences, [(None, initial_bot_message)], new_chat_state, gr.update(visible=True)
 
+
+# --- Hàm xử lý khi người dùng gửi tin nhắn chat ---
 def handle_user_chat_message(user_message, chat_history, chat_state):
-    if not user_message.strip():
+    if not user_message.strip(): # Bỏ qua nếu tin nhắn trống
         return chat_history, chat_state
 
     if chat_state is None or "gemini_chat_session" not in chat_state or chat_state["gemini_chat_session"] is None:
         chat_history.append((user_message, "Lỗi: Phiên chat chưa được khởi tạo. Vui lòng phân tích ảnh trước."))
         return chat_history, chat_state
 
-    chat_history.append((user_message, None))
+    # Thêm tin nhắn của người dùng vào lịch sử hiển thị
+    chat_history.append((user_message, None)) # Placeholder cho phản hồi của bot
 
+    # Gửi tin nhắn đến Gemini
     gemini_chat_session = chat_state["gemini_chat_session"]
     bot_response_text = ""
     try:
-        response = gemini_chat_session.send_message(user_message)
+        # Prompt có thể cần thêm ngữ cảnh về chẩn đoán ban đầu nếu cần,
+        # nhưng ChatSession của Gemini nên tự quản lý lịch sử.
+        # contextual_user_message = f"Based on the initial finding of '{chat_state.get('diagnosis', 'unknown')}', the user asks: {user_message}"
+        # response = gemini_chat_session.send_message(contextual_user_message)
+        response = gemini_chat_session.send_message(user_message) # Gửi thẳng tin nhắn người dùng
         bot_response_text = response.text
     except Exception as e:
         print(f"Lỗi khi gửi tin nhắn đến Gemini: {e}")
         bot_response_text = "Xin lỗi, tôi gặp sự cố khi xử lý yêu cầu của bạn."
 
+    # Cập nhật tin nhắn cuối cùng trong lịch sử với phản hồi của bot
     chat_history[-1] = (user_message, bot_response_text)
     
+    # Trạng thái chat_state (đặc biệt là gemini_chat_session) được cập nhật nội bộ
     return chat_history, chat_state
 
+
+# --- Xây dựng giao diện Gradio ---
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown(
         """
         <div style='text-align: center;'>
-        <h1>🧠 Phân Loại Khối U Não </h1>
+        <h1>🧠 Phân Loại Khối U Não & Chatbot Gợi Ý Y Tế</h1>
         </div>
         Tải lên ảnh MRI não để phân loại khối u. Sau đó, bạn có thể trò chuyện với chatbot để hỏi thêm thông tin.
         **LƯU Ý CỰC KỲ QUAN TRỌNG:** Thông tin từ chatbot **KHÔNG PHẢI** là chẩn đoán y khoa và **KHÔNG THAY THẾ** tư vấn từ bác sĩ chuyên nghiệp.
@@ -180,16 +230,55 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         """
     )
 
+    # Biến trạng thái để lưu trữ thông tin giữa các lần tương tác
+    # diagnosis: kết quả chẩn đoán từ model Keras
+    # gemini_chat_session: đối tượng chat session của Gemini
     app_state = gr.State({"diagnosis": None, "gemini_chat_session": None})
 
     with gr.Row():
-        with gr.Column(scale=1):
+        with gr.Column(scale=2):
             input_image = gr.Image(type="pil", label="1. Tải lên ảnh MRI não")
             analyze_button = gr.Button("🔬 Phân tích ảnh & Bắt đầu Chat", variant="primary")
             output_prediction = gr.Label(label="Kết quả phân loại (Keras Model)")
-        
-        with gr.Column(scale=2):
+            gr.Markdown("### Ảnh MRI minh họa") # Tiêu đề nhỏ cho phần ảnh
+            
+            # Đường dẫn đến thư mục chứa ảnh tĩnh
+            STATIC_IMAGE_DIR = "static_mri_examples" # Đảm bảo thư mục này tồn tại cùng cấp file .py hoặc cung cấp đường dẫn tuyệt đối
+            
+            # Danh sách các tệp ảnh (đảm bảo tên tệp chính xác)
+            example_image_files = [
+                os.path.join(STATIC_IMAGE_DIR, "Te-gl_0012.jpg"),
+                os.path.join(STATIC_IMAGE_DIR, "Te-meTr_0002.jpg"),
+                os.path.join(STATIC_IMAGE_DIR, "Te-noTr_0000.jpg"),
+                os.path.join(STATIC_IMAGE_DIR, "Te-piTr_0007.jpg")
+            ] 
+             # Kiểm tra xem các tệp ảnh có tồn tại không
+            existing_images = [img_path for img_path in example_image_files if os.path.exists(img_path)]
+            
+            if len(existing_images) == 4:
+                 # Sử dụng gr.update() để set giá trị ban đầu cho Gallery sau khi Blocks được định nghĩa
+                gallery_value = existing_images
+            else:
+                print(f"Cảnh báo: Không tìm thấy đủ 4 ảnh trong thư mục '{STATIC_IMAGE_DIR}'. Tìm thấy: {len(existing_images)} ảnh.")
+                print(f"Các ảnh không tìm thấy: {[p for p in example_image_files if not os.path.exists(p)]}")
+                # Có thể hiển thị ảnh placeholder hoặc không hiển thị gì cả
+                gallery_value = existing_images # Sẽ chỉ hiển thị những ảnh tìm thấy
+
+            # Nếu muốn Gallery luôn có slot cho 4 ảnh, kể cả khi file không tồn tại (sẽ hiển thị lỗi ảnh)
+            # thì dùng example_image_files trực tiếp, nhưng tốt hơn là kiểm tra file
+            if gallery_value: # Chỉ hiển thị gallery nếu có ít nhất 1 ảnh
+                gr.Gallery(
+                    value=gallery_value,
+                    label="4 Ảnh MRI Minh Họa",
+                    columns=2,  # Hiển thị 2 ảnh trên một hàng (tổng 2 hàng) hoặc 4 để 4 ảnh trên 1 hàng
+                    object_fit="contain", # hoặc "cover"
+                    height="auto" # Tự động điều chỉnh chiều cao
+                )
+            else:
+                gr.Markdown("<p style='color:orange;'>Không thể tải ảnh minh họa. Vui lòng kiểm tra đường dẫn và tên tệp.</p>")  
+        with gr.Column(scale=1):
             gr.Markdown("### 💬 Trò chuyện với Chatbot Y Tế")
+            # Ẩn vùng chat ban đầu, chỉ hiện sau khi phân tích ảnh
             with gr.Group(visible=False) as chat_interface_group:
                 chatbot_display = gr.Chatbot(label="Chatbot", height=400)
                 user_chat_input = gr.Textbox(label="Nhập câu hỏi của bạn:", placeholder="Hỏi tôi về thông tin chung liên quan đến kết quả...")
@@ -199,23 +288,27 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         "<p style='text-align:center; color:red; font-weight:bold;'>Chatbot chỉ cung cấp thông tin tham khảo. Luôn hỏi ý kiến bác sĩ!</p>"
     )
 
+    # Kết nối các hành động
     analyze_button.click(
         fn=handle_image_analysis_and_start_chat,
         inputs=[input_image, app_state],
         outputs=[output_prediction, chatbot_display, app_state, chat_interface_group]
     )
 
+    # Xử lý khi người dùng gửi tin nhắn trong textbox (nhấn Enter)
     user_chat_input.submit(
         fn=handle_user_chat_message,
         inputs=[user_chat_input, chatbot_display, app_state],
         outputs=[chatbot_display, app_state]
-    ).then(lambda: "", outputs=[user_chat_input])
+    ).then(lambda: "", outputs=[user_chat_input]) # Xóa textbox sau khi gửi
 
+    # Xử lý khi người dùng nhấn nút "Gửi"
     send_button.click(
         fn=handle_user_chat_message,
         inputs=[user_chat_input, chatbot_display, app_state],
         outputs=[chatbot_display, app_state]
-    ).then(lambda: "", outputs=[user_chat_input])
+    ).then(lambda: "", outputs=[user_chat_input]) # Xóa textbox sau khi gửi
+
 
 if __name__ == "__main__":
     if keras_model is None:
