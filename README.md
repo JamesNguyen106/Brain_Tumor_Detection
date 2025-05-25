@@ -1,4 +1,4 @@
-# Brain Tunor Detect 
+# Brain Tumor Detect 
 
 Deep learning is a rapidly evolving field with significant implications for medical imaging. Currently, the interpretation of medical images, such as MRI and CT scans, is predominantly performed by radiologists and specialized physicians. However, this interpretation process can sometimes be subjective. Even experienced professionals may face challenges in consistently evaluating scans, for instance, when determining the presence or classifying a tumor solely from visual information. Furthermore, medical experts often need to review large volumes of images, which can lead to fatigue and an increased risk of oversight or errors. Consequently, the need for automation and decision support in this domain is increasingly critical.
 
