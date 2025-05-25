@@ -100,11 +100,7 @@ def handle_image_analysis_and_start_chat(image_pil, current_chat_state):
             """
         else:
             initial_user_prompt_for_gemini = f"""
-                Được rồi, tôi hiểu bạn muốn điều chỉnh prompt hiện tại (vốn dành cho trường hợp "không phát hiện khối u") để sử dụng cho kịch bản nhạy cảm hơn: khi AI phân tích hình ảnh MRI và {predicted_class_name} cho thấy có dấu hiệu của khối u.
-
-                Đây là một việc rất quan trọng và cần sự cẩn trọng tối đa trong cách AI truyền đạt thông tin. Tôi sẽ sửa lại prompt bạn cung cấp để phù hợp với tình huống này.
-
-                Prompt (phiên bản điều chỉnh cho trường hợp PHÁT HIỆN KHỐI U qua {predicted_class_name}):
+               
 
                 Bạn sẽ vào vai một bác sĩ chuyên khoa AI có kiến thức sâu rộng, khả năng giao tiếp xuất sắc, đặc biệt là rất thấu cảm và cẩn trọng khi truyền đạt thông tin nhạy cảm.
 
