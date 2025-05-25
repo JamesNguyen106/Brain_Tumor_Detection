@@ -43,4 +43,4 @@ After completing the setup and having the model file:
 * All decisions related to health and medical treatment must be made after direct consultation with a specialist doctor.
 * The developer is not responsible for any decisions made based on information from this application.
 
-## File Structure (Brief)
+
